@@ -6,6 +6,7 @@ from datetime import datetime
 import streamlit as st
 from streamlit import session_state
 import pandas as pd
+import time
 
 # Provide your API key
 api_key = 'AIzaSyCM6pL44BGZUVLK0NEBr5Y45EPZT1mDmiA'
@@ -16,28 +17,18 @@ youtube = build('youtube', 'v3', developerKey=api_key)
 # Connect to the MongoDB server
 mongo_client = MongoClient('mongodb+srv://kapil:srk012126@newcluster.ataklof.mongodb.net/')
 mongo_db = mongo_client['youtube_data_harvesting']
-mongo_collection = mongo_db['channel_7']
+mongo_collection = mongo_db['channel_11']
 
 # Connect to the MySQL server
 mysql_connection = mysql.connector.connect(
     host='localhost',
     user='root',
     password='srk012126',
-    database='channel_7'
+    database='channel_1'
 )
 mysql_cursor = mysql_connection.cursor()
 
 def transfer_data_to_mysql(mysql_cursor, mysql_connection, mongo_collection):
-    # Create table schemas
-    mysql_cursor.execute('''
-        CREATE TABLE IF NOT EXISTS channel_data (
-            channel_id VARCHAR(255) PRIMARY KEY,
-            channel_name VARCHAR(255),
-            subscription_count INT,
-            channel_views INT,
-            channel_description TEXT
-        )
-    ''')
 
     # Fetch the channel data from MongoDB
     channel_data = mongo_collection.find_one()
@@ -58,17 +49,9 @@ def transfer_data_to_mysql(mysql_cursor, mysql_connection, mongo_collection):
         channel_data['Channel_Description']
     ))
 
-    mysql_cursor.execute('''
-        CREATE TABLE IF NOT EXISTS playlist_data (
-            playlist_id VARCHAR(255) PRIMARY KEY,
-            playlist_name VARCHAR(255),
-            channel_id VARCHAR(255),
-            FOREIGN KEY (channel_id) REFERENCES channel_data (channel_id)
-        )
-    ''')
-
     # Retrieve channel ID
     channel_id = channel_data['Channel_Id']
+
 
     # Retrieve playlist information
     playlists = channel_data.get('Playlists', {})
@@ -82,24 +65,6 @@ def transfer_data_to_mysql(mysql_cursor, mysql_connection, mongo_collection):
         ''', (playlist_id, playlist_name, channel_id))
         mysql_connection.commit()
 
-    # Create MySQL table for video data
-    mysql_cursor.execute('''
-        CREATE TABLE IF NOT EXISTS video_data (
-            video_id VARCHAR(255) PRIMARY KEY,
-            playlist_id VARCHAR(255),
-            title VARCHAR(255),
-            description TEXT,
-            published_date DATETIME,
-            view_count INT,
-            like_count INT,
-            dislike_count INT,
-            favorite_count INT,
-            comment_count INT,
-            duration VARCHAR(255),
-            thumbnail VARCHAR(255),
-            caption_status VARCHAR(255)
-        )
-    ''')
 
     # Retrieve video data from MongoDB
     video_details = list(mongo_collection.find())
@@ -154,17 +119,7 @@ def transfer_data_to_mysql(mysql_cursor, mysql_connection, mongo_collection):
             ))
             mysql_connection.commit()
 
-    # Create the comment_data table if it doesn't exist
-    mysql_cursor.execute('''
-        CREATE TABLE IF NOT EXISTS comment_data (
-            comment_id VARCHAR(255) PRIMARY KEY,
-            comment_text TEXT,
-            comment_author VARCHAR(255),
-            comment_published_date DATETIME,
-            video_id VARCHAR(255)
-        )
-    ''')
-
+    
     # Retrieve comments from MongoDB
     comments = mongo_collection.aggregate([
         {"$unwind": "$Videos"},
@@ -195,6 +150,7 @@ def transfer_data_to_mysql(mysql_cursor, mysql_connection, mongo_collection):
             comment_id, comment_text, comment_author, comment_published_date, video_id
         ))
         mysql_connection.commit()
+
 
 def get_video_details(api_key, playlist_id):
     youtube = build('youtube', 'v3', developerKey=api_key)
@@ -371,33 +327,47 @@ def fetch_query_result(query):
 query1 = '''SELECT ch.channel_name, vi.title as video_name FROM channel_data AS ch
 JOIN playlist_data AS pl ON ch.channel_id = pl.channel_id
 JOIN video_data AS vi ON pl.playlist_id = vi.playlist_id
-JOIN comment_data AS cm ON vi.video_id = cm.video_id;'''
+JOIN comment_data AS cm ON vi.video_id = cm.video_id order by ch.channel_name;'''
 
 # Query 2: Channels with the most number of videos and the number of videos
 query2 = '''SELECT ch.channel_name, COUNT(vi.video_id) AS number_of_videos
 FROM channel_data AS ch
 JOIN playlist_data AS pl ON ch.channel_id = pl.channel_id
 JOIN video_data AS vi ON pl.playlist_id = vi.playlist_id
-GROUP BY ch.channel_name
-ORDER BY number_of_videos DESC;'''
+GROUP BY ch.channel_name;'''
 
 # Query 3: Top 10 most viewed videos and their respective channels
-query3 = '''SELECT ch.channel_name, vi.title as video_name, vi.view_count FROM channel_data AS ch
-JOIN playlist_data AS pl ON ch.channel_id = pl.channel_id
-JOIN video_data AS vi ON pl.playlist_id = vi.playlist_id
-ORDER BY vi.view_count DESC LIMIT 10;'''
+query3 = '''SELECT channel_name, video_name, view_count
+FROM (
+  SELECT ch.channel_name, vi.title AS video_name, vi.view_count,
+         ROW_NUMBER() OVER (PARTITION BY ch.channel_id ORDER BY vi.view_count DESC) AS rn
+  FROM channel_data AS ch
+  JOIN playlist_data AS pl ON ch.channel_id = pl.channel_id
+  JOIN video_data AS vi ON pl.playlist_id = vi.playlist_id
+) ranked
+WHERE rn <= 10;'''
 
 # Query 4: Number of comments on each video and their corresponding video names
-query4 = '''SELECT vi.title as video_name, COUNT(cm.comment_id) AS number_of_comments FROM video_data AS vi
-JOIN comment_data AS cm ON vi.video_id = cm.video_id
-GROUP BY vi.title
-ORDER BY number_of_comments;'''
-
-# Query 5: Videos with the highest number of likes and their corresponding channel names
-query5 = '''SELECT ch.channel_name, vi.title as video_name, vi.like_count FROM channel_data AS ch
+query4 = '''SELECT ch.channel_name, vi.title AS video_name, COUNT(cm.comment_id) AS number_of_comments
+FROM channel_data AS ch
 JOIN playlist_data AS pl ON ch.channel_id = pl.channel_id
 JOIN video_data AS vi ON pl.playlist_id = vi.playlist_id
-ORDER BY vi.like_count DESC LIMIT 1;'''
+JOIN comment_data AS cm ON vi.video_id = cm.video_id 
+GROUP BY ch.channel_name, vi.title
+ORDER BY ch.channel_name;'''
+
+# Query 5: Videos with the highest number of likes and their corresponding channel names
+query5 = '''SELECT channel_name, video_name, like_count
+FROM (
+  SELECT ch.channel_name, vi.title AS video_name, vi.like_count,
+         RANK() OVER (PARTITION BY ch.channel_id ORDER BY vi.like_count DESC) AS video_rank
+  FROM channel_data AS ch
+  JOIN playlist_data AS pl ON ch.channel_id = pl.channel_id
+  JOIN video_data AS vi ON pl.playlist_id = vi.playlist_id
+) ranked_videos
+WHERE video_rank = 1
+ORDER BY like_count DESC
+LIMIT 0, 50000;'''
 
 # Query 6: Total number of likes and dislikes for each video and their corresponding video names
 query6 = '''SELECT vi.title as video_name, vi.like_count, vi.dislike_count FROM video_data AS vi;'''
@@ -409,7 +379,7 @@ JOIN video_data AS vi ON pl.playlist_id = vi.playlist_id
 GROUP BY ch.channel_name;'''
 
 # Query 8: Channels that published videos in the year 2022
-query8 = '''SELECT ch.channel_name, vi.title as video_name FROM channel_data AS ch
+query8 = '''SELECT ch.channel_name, vi.title as video_name, year(vi.published_date)as published_year FROM channel_data AS ch
 JOIN playlist_data AS pl ON ch.channel_id = pl.channel_id
 JOIN video_data AS vi ON pl.playlist_id = vi.playlist_id
 WHERE YEAR(vi.published_date) = 2022;'''
@@ -429,13 +399,17 @@ JOIN (
 GROUP BY ch.channel_name;'''
 
 # Query 10: Videos with the highest number of comments and their corresponding channel names
-query10 = '''SELECT ch.channel_name, vi.title as video_name, COUNT(cm.comment_id) AS highest_number_of_comment
-FROM channel_data AS ch
-JOIN playlist_data AS pl ON ch.channel_id = pl.channel_id
-JOIN video_data AS vi ON pl.playlist_id = vi.playlist_id
-JOIN comment_data AS cm ON vi.video_id = cm.video_id
-GROUP BY vi.title, ch.channel_name
-ORDER BY highest_number_of_comment DESC LIMIT 1;'''
+query10 = '''SELECT channel_name, video_name, highest_number_of_comment
+FROM (
+  SELECT ch.channel_name, vi.title AS video_name, COUNT(cm.comment_id) AS highest_number_of_comment,
+         RANK() OVER (PARTITION BY ch.channel_id ORDER BY COUNT(cm.comment_id) DESC) AS comment_rank
+  FROM channel_data AS ch
+  JOIN playlist_data AS pl ON ch.channel_id = pl.channel_id
+  JOIN video_data AS vi ON pl.playlist_id = vi.playlist_id
+  JOIN comment_data AS cm ON vi.video_id = cm.video_id
+  GROUP BY ch.channel_id, vi.title
+) ranked
+WHERE comment_rank = 1;'''
 
 def main():
     # Streamlit app
@@ -459,20 +433,49 @@ def main():
 
 def page1():
     # Channel ID input
-    channel_id = st.text_input("Enter Channel ID")
+    channel_id = st.text_input("Enter Channel ID 👇")
 
     if channel_id:
         if st.button("Load into MongoDB"):
-            # Retrieve channel information
-            channel_info = get_channel_info(api_key, channel_id)
-
+            progress_bar = st.progress(0)  # Initialize the progress bar
+            progress_text = st.empty()  # Placeholder to update progress text
+            with st.spinner("Loading data into MongoDB..."):
+                 # Retrieve channel information
+                 channel_info = get_channel_info(api_key, channel_id)
+                 st.session_state.mongodb_data_loaded = True
+                 for i in range(100):  # Simulating progress from 0 to 100%
+                    time.sleep(0.1)  # Simulating some work being done
+                    progress_bar.progress(i + 1)
+                    progress_text.text(f"Progress: {i+1}%")
+            progress_text.empty()  # Clear the progress text
+                 
             # Print the channel information
             if channel_info is not None:
                 # Insert channel information into the collection b
                 mongo_collection.insert_one(channel_info)
 
-                # Display the channel name as a subheader
-                st.subheader(f"Channel Name: {channel_info['Channel_Name']}")
+               
+                image_path = 'C:/Users/KAPIL/Downloads/YT.png'
+                # Define the layout with columns
+                col1, col2 = st.columns([0.5, 0.3])
+
+                # Place the subheader in the first column
+                col1.subheader(f"Channel Name: {channel_info['Channel_Name']}")
+
+                # Load and display the image in the second column
+                @st.cache_data()
+                def load_image(image_path):
+                    with open(image_path, "rb") as f:
+                        return f.read()
+
+                image_data = load_image(image_path)
+
+                # Specify the image width
+                image_width = 50  # Adjust this value to control the image size
+
+                # Display the image with the specified width
+                col2.image(image_data, use_column_width=False, width=image_width)
+                   
 
                 # Retrieve playlist information
                 playlists = channel_info.get('Playlists', {})
@@ -505,17 +508,21 @@ def page1():
                         # Insert the playlist information into MongoDB
                         mongo_collection.insert_one(playlist_info)
 
-                st.success("Data loaded into MongoDB successfully!")
+                st.success("Data loaded into MongoDB successfully!",icon='✅')
+                st.snow()
                 st.write("\n\n\n\n")  # Create a gap of 3 lines
                 st.write("To fetch the data from MongoDB and load into MySQL, click ----> page2.")
 
 def page2():
     st.subheader("To Load The Youtube Details Into Mysql Click The Button")
     if st.button("Load into MySQL"):
-        transfer_data_to_mysql(mysql_cursor, mysql_connection, mongo_collection)
-        st.session_state.mysql_data_loaded = True
+        with st.spinner("Loading data into MySQL..."):
+            transfer_data_to_mysql(mysql_cursor, mysql_connection, mongo_collection)
+            st.session_state.mysql_data_loaded = True
+       
         st.write("\n\n\n\n") 
-        st.success("Data loaded into MySQL successfully!")
+        st.success("Data loaded into MySQL successfully!",icon='✅')
+        st.snow()
         st.write("\n\n\n\n")  # Create a gap of 3 lines
         st.write("To see the Channel Details, click ----> page3.")
 
@@ -560,9 +567,8 @@ def page4():
 
     # Display the selectbox to choose the query
     selected_query_name = st.selectbox("Select Query", list(queries.keys()))
-
+ 
     if st.button("Execute Query"):
-        st.title(selected_query_name)
         query = queries[selected_query_name]
         df = fetch_query_result(query)
         st.dataframe(df)
