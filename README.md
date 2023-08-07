@@ -4,11 +4,11 @@
 The project name is youtube data harvesting that allows users to retrieve and analyze data from YouTube channels through API key. It utilizes the YouTube Data API to fetch information such as channel statistics, video details, comments, and more.
 
 # Installation:
-pip install google-api-python-client
-pip install pymongo
-pip install mysql-connector-python
-pip install streamlit
-pip install pandas
+pip install google-api-python-client,
+pip install pymongo,
+pip install mysql-connector-python,
+pip install streamlit,
+pip install pandas.
 
 # Technologies Used:
 Python: The project is implemented using the Python programming language.
