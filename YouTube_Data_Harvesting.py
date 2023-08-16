@@ -177,37 +177,22 @@ def get_video_details(api_key, playlist_id):
             video_items = video_response['items']
 
             for video, item in zip(videos, video_items):
-                video_id = video['snippet']['resourceId']['videoId']
-                playlist_id = playlist_id
-                title = item['snippet']['title']
-                description = item['snippet']['description']
-                published_date = item['snippet']['publishedAt']
-                view_count = item['statistics']['viewCount']
-                like_count = item['statistics'].get('likeCount', 0)
-                dislike_count = item['statistics'].get('dislikeCount', 0) if 'dislikeCount' in item[
-                    'statistics'] else 0
-                favorite_count = item['statistics'].get('favoriteCount', 0) if 'favoriteCount' in item[
-                    'statistics'] else 0
-                comment_count = item['statistics'].get('commentCount', 0)
-                duration = item['contentDetails']['duration']
-                thumbnail = item['snippet']['thumbnails']['default']['url']
-                caption_status = item['contentDetails']['caption']
-
-                video_details.append({
-                    'Video_ID': video_id,
-                    'Playlist_ID': playlist_id,
-                    'Title': title,
-                    'Description': description,
-                    'Published_Date': published_date,
-                    'View_Count': view_count,
-                    'Like_Count': like_count,
-                    'Dislike_Count': dislike_count,
-                    'Favorite_Count': favorite_count,
-                    'Comment_Count': comment_count,
-                    'Duration': duration,
-                    'Thumbnail': thumbnail,
-                    'Caption_Status': caption_status
-                })
+                video_dict = {
+                'Playlist_ID': playlist_id,
+                'Video_ID': video['snippet']['resourceId']['videoId'],
+                'Title': item['snippet']['title'],
+                'Description': item['snippet']['description'],
+                'Published_Date': item['snippet']['publishedAt'],
+                'View_Count': item['statistics']['viewCount'],
+                'Like_Count': item['statistics'].get('likeCount', 0),
+                'Dislike_Count': item['statistics'].get('dislikeCount', 0),
+                'Favorite_Count': item['statistics'].get('favoriteCount', 0),
+                'Comment_Count': item['statistics'].get('commentCount', 0),
+                'Duration': item['contentDetails']['duration'],
+                'Thumbnail': item['snippet']['thumbnails']['default']['url'],
+                'Caption_Status': item['contentDetails']['caption']
+            }
+            video_details.append(video_dict)
 
         return video_details
     except HttpError as e:
@@ -420,15 +405,15 @@ def main():
         st.session_state.mysql_data_loaded = False
 
     # Page navigation
-    page = st.radio("Navigation", ['page1', 'page2', 'page3','page4'])
+    page = st.radio("Navigation", ['Extraction_Of_Data', 'Data_Migration', 'Mysql_Tables','Query_Execution'])
 
-    if page == 'page1':
+    if page == 'Extraction_Of_Data':
         page1()
-    elif page == 'page2':
+    elif page == 'Data_Migration':
         page2()
-    elif page == 'page3':
+    elif page == 'Mysql_Tables':
         page3()
-    elif page == 'page4':
+    elif page == 'Query_Execution':
         page4()
 
 def page1():
